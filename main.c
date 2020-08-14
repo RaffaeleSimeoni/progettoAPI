@@ -13,9 +13,9 @@ typedef struct docListNode{
 
 
 typedef struct timeLineListNode{
-    char **line;    //puntatore al primo elemento di un array di string contenente le righe cambiate
-    int n;     //n è il n° di righe cambiate
-    int *i;     //puntatore al primo elem di un array contenente i numeri delle righe cambiate
+    char *line;    //puntatore al primo elemento di un array di string contenente le righe cambiate
+    int time;     //n è il n° di righe cambiate
+    int i;     //puntatore al primo elem di un array contenente i numeri delle righe cambiate
     int deleted;
     struct timeLineListNode *next;
     struct timeLineListNode *prev;
@@ -44,17 +44,19 @@ void init_timeList(timeList *list2);
 void init_docList(docList *list);
 void insertDocNode(docList *list,String line);
 void changeDocNode(docNode *node, String l);
-void insertTimeNode(int dim,timeList *list);
+void insertTimeNode(int time,int ind,timeList *list);
 docNode* pickANode(int ind, docList *list);
 static inline char *read(char *row, FILE *fp);
 void clearList(timeList *list);
-void rebuildList(timeNode *tNode, docList *list);
-void moveTimeNode(timeNode *node, timeList *list);
+timeNode* rebuildList(timeNode *tNode, docList *list,timeList *UndoList,timeList *RedoList,int timeToReach);
+void moveTimeNode(timeNode *node, timeList *dest,timeList *source);
 void clearDocList(docList *list,docNode *node);
+void changeTimeNode(timeNode *node,char *line);
+timeNode* reDelete(timeNode *tNode, docList *DocList,timeList *UndoList,timeList *RedoList,int timeToReach);
 
-int T = 1;
+int T ;
 int main() {
-    //int T = 1; //tempo corrente in cui mi trovo
+    T = 1; //tempo corrente in cui mi trovo
     char *line;
     line = (char*) malloc(1025*sizeof(char));
     char command[100];
@@ -64,6 +66,7 @@ int main() {
     init_timeList(&RedoList);
     init_docList(&DocList);
     int end = 1;
+    int timeToReach;
 
 
 
@@ -76,6 +79,8 @@ int main() {
         char ind1[100],ind2[100];
         char *token;
         int i1,i2;
+        int cont = 0;
+
         switch (command[strlen(command)-1]) {
             case 'c':
                 token = strtok(command, ",");
@@ -86,37 +91,28 @@ int main() {
                 i1 = atoi(ind1);
                 i2 = atoi(ind2);
 
-                int cont = 0;
-                /*
-                 * OPERAZIONI SULLA TIMELINE
-                 */
-                insertTimeNode(i2-i1,&UndoList);
 
-                /*
-                 * OPERAZIONI SUL DOCUMENTO
-                 */
-                for(int i=i1; i<=i2; i++){
+                for(int i=i1; i<=i2; i++){  //cicla sugli indirizzi da modificare
                     read(line,stdin);
+                    insertTimeNode(T,i,&UndoList);
                     if(strcmp(line,".") != 0) {
                         if (i > DocList.count) {     //la linea non è presente nel doc ma ne va creata una nuova
-                            UndoList.tailer->i[cont] = i;
-                            UndoList.tailer->line[cont] = NULL;
+                            UndoList.tailer->line = NULL;
                             //strcpy(UndoList.tailer->line[cont],NULL );   //la line dell'undo rimane a NULL perchè prima non c'era niente
                             insertDocNode(&DocList,line);   //ATTENZIONE: insertDocNote richiede una stringa, non un puntatore. controlla se funziona lo stesso
 
-                        } else {
+                        } else {   //si va a modificare una riga esistente
                             docNode *temp = pickANode(i, &DocList);
-                            UndoList.tailer->i[cont] = i;
-                            UndoList.tailer->line[cont] = (char*)malloc(strlen(line)*sizeof(char));
-                            UndoList.tailer->line[cont] = strdup(temp->line);
+                            changeTimeNode(UndoList.tailer,temp->line);
                             //strcpy(UndoList.tailer->line[cont], temp->line);  PROVA STRDUP
                             changeDocNode(temp, line);   //prende il nodo i e gli cambia la line con quella letta da stdin
 
                         }
-                        cont++;
                     }
                 }
                 clearList(&RedoList);
+                T++;
+                read(line,stdin);
                 break;
 
             case 'd':
@@ -133,83 +129,81 @@ int main() {
                 docNode *temp2;
                 if(i1>0 && i1<=DocList.count) {
                     temp1 = pickANode(i1, &DocList);
-                    insertTimeNode(i2-i1, &UndoList);
-                    UndoList.tailer->deleted = 1;
+                    //insertTimeNode(i2-i1, &UndoList);
+                    //UndoList.tailer->deleted = 1;
                 }
 
-                if(i1 == 1 && i2<DocList.count){   //si parte a cancellare dal primo nodo
-                    for(int i=i1; i<=i2; i++){
-                        UndoList.tailer->i[cont] = i;
-                        UndoList.tailer->line[cont] = (char*)malloc(strlen(line)*sizeof(char));
-                        UndoList.tailer->line[cont] = strdup(temp1->line);
-                        //strcpy(UndoList.tailer->line[cont], temp1->line);  PROVA STRDUP
+                if(i1==0 && i2==0){     //caso particolare di delete, non fa nulla ma va contata
+                    insertTimeNode(T,0,&UndoList);
+                    changeTimeNode(UndoList.tailer," ");
+                    UndoList.tailer->deleted = 1;
+                }
+                else if(i1 == 1 && i2<DocList.count){   //si parte a cancellare dal primo nodo
+                    for(int i=i1; i<=i2; i++){   //cicla sugli indirizzi da cancellare
+                        insertTimeNode(T,i,&UndoList);
+                        changeTimeNode(UndoList.tailer,temp1->line);
+                        UndoList.tailer->deleted = 1;
                         temp1 = temp1->next;
                         free(temp1->prev);
                         temp1->prev = NULL;   //cancellando partendo dal primo nodo non ci sarà un prev
-                        cont++;
+                        DocList.count--;
                     }
                     DocList.header=temp1;
                 }
-
-                if(i1>1 && i2<DocList.count){   //si cancella senza toccare gli estremi della lista
+                else if(i1>1 && i2<DocList.count){   //si cancella senza toccare gli estremi della lista
                     temp2 = pickANode(i1-1,&DocList);
                     for(int i=i1; i<=i2; i++){
-                        UndoList.tailer->i[cont] = i;
-                        UndoList.tailer->line[cont] = (char*)malloc(strlen(line)*sizeof(char));
-                        UndoList.tailer->line[cont] = strdup(temp1->line);
-                        //strcpy(UndoList.tailer->line[cont], temp1->line); PROVA STRDUP
+                        insertTimeNode(T,i,&UndoList);
+                        changeTimeNode(UndoList.tailer,temp1->line);
+                        UndoList.tailer->deleted = 1;
                         temp1 = temp1->next;
                         free(temp1->prev);
                         temp1->prev = temp2;
-                        cont++;
+                        DocList.count--;
                     }
                     temp2->next = temp1;
                 }
-
-                if(i1>1 && i2>=DocList.count){   //si cancella arrivando fino all'ultimo nodo
+                else if(i1>1 && i2>=DocList.count){   //si cancella arrivando fino all'ultimo nodo
                     temp2 = pickANode(i1-1,&DocList);
                     DocList.tailer = temp2;
                     for(int i=i1; i<=i2; i++){
                         if(i<DocList.count) {
-                            UndoList.tailer->i[cont] = i;
-                            UndoList.tailer->line[cont] = (char*)malloc(strlen(line)*sizeof(char));
-                            UndoList.tailer->line[cont] = strdup(temp1->line);
-                            //strcpy(UndoList.tailer->line[cont], temp1->line);  //PROVA STRDUP
+                            insertTimeNode(T,i,&UndoList);
+                            changeTimeNode(UndoList.tailer,temp1->line);
+                            UndoList.tailer->deleted = 1;
                             temp1 = temp1->next;
                             free(temp1->prev);
                             temp1->prev = temp2;
+                            DocList.count--;
                         }
                         if(i==DocList.count){
-                            UndoList.tailer->i[cont] = i;
-                            UndoList.tailer->line[cont] = (char*)malloc(strlen(line)*sizeof(char));
-                            UndoList.tailer->line[cont] = strdup(temp1->line);
-                            //strcpy(UndoList.tailer->line[cont], temp1->line);  PROVA STRDUP   SE FUNZIONA FALLO ANCHE NEI CASI RESTANTI
+                            insertTimeNode(T,i,&UndoList);
+                            changeTimeNode(UndoList.tailer,temp1->line);
+                            UndoList.tailer->deleted = 1;
                             temp2->next = NULL;
                             free(temp1);
+                            DocList.count--;
                         }
-                        cont++;
+
                     }
 
                 }
-
-                if(i1==1 && i2>=DocList.count){   //viene cancellata tutta la lista
-                    insertTimeNode(DocList.count, &UndoList);
-                    UndoList.tailer->deleted = 1;
+                else if(i1==1 && i2>=DocList.count){   //viene cancellata tutta la lista
                     temp1 = DocList.header;
                     for(int i=i1;i<=i2;i++){
                         if(i>=1 && i<DocList.count){
-                            UndoList.tailer->i[cont] = i;
-                            UndoList.tailer->line[cont] = (char*)malloc(strlen(line)*sizeof(char));
-                            strcpy(UndoList.tailer->line[cont], temp1->line);
+                            insertTimeNode(T,i,&UndoList);
+                            changeTimeNode(UndoList.tailer,temp1->line);
+                            UndoList.tailer->deleted = 1;
                             temp1 = temp1->next;
                             free(temp1->prev);
                             temp1->prev = NULL;   //cancellando partendo dal primo nodo non ci sarà un prev
                             cont++;
                         }
                         if(i==DocList.count){
-                            UndoList.tailer->i[cont] = i;
-                            UndoList.tailer->line[cont] = (char*)malloc(strlen(line)*sizeof(char));
-                            strcpy(UndoList.tailer->line[cont], temp1->line);
+                            insertTimeNode(T,i,&UndoList);
+                            changeTimeNode(UndoList.tailer,temp1->line);
+                            UndoList.tailer->deleted = 1;
                             free(temp1);
                         }
                     }
@@ -219,84 +213,85 @@ int main() {
 
                 }
 
-                DocList.count = DocList.count - (i2-i1) -1;
-
-                if(i1==i2==0){     //caso particolare di delete, non fa nulla ma va contata
-                    insertTimeNode(1, &UndoList);
-                    UndoList.tailer->deleted = 1;
-                    UndoList.tailer->i[cont] = 0;    //non è stato eliminato niente ma va contata come undo
-                    DocList.count++;
-                }
                 clearList(&RedoList);
+                T++;
                 break;
             case 'u':
                 token = strtok(command, "u");
                 strcpy(ind1,token);
                 i1 = atoi(ind1);    //numero di undo da eseguire
-                if(i1>UndoList.count){
-                    i1 = UndoList.count;
+                timeToReach = T - 1 - i1;
+                if(timeToReach < 1){
+                    timeToReach = 0;
                 }
 
-                for(int i=1;i<=i1;i++){   //cicla sul numero degli undo
-                    timeNode *current = UndoList.tailer;
-                    insertTimeNode(UndoList.tailer->n,&RedoList);
-                    if(current->deleted == 1){  //va eseguita l'undo di una delete
-                       rebuildList(current,&DocList);
+                timeNode *current = UndoList.tailer;
+                timeNode *prev;
+                while (current != NULL && current->time > timeToReach){
+                    if(current->deleted == 1) {  //va eseguita l'undo di una delete
+                       current = rebuildList(current,&DocList,&UndoList,&RedoList,timeToReach);
                     }else{   //va eseguita una change per riportare la riga (ancora esistente) al vecchio valore
-                        cont = 0;
-                        docNode *temp = pickANode(current->i[current->n-1],&DocList);
-                        docNode *eliminaDa;
-                        for(int t=current->n;t>0;t--){   //cicla sul numero di righe presenti nel nodo undo
-                            if(current->line[t] == NULL) {  //vuol dire che si fa l'undo di un change che ha aggiunto la riga (prima del change c'era NULL, non un'altra riga)
-                                eliminaDa = temp;
-                                current->line[t] = strdup(temp->line);  //prima di eliminare il docNode aggiorno il valore (mi servirà in caso di redo)
-                            }else{   //si fa l'undo di una modifica ad una riga già esistente
-                                char cambio[1025];
-                                strcpy(cambio,temp->line);
-                                strcpy(temp->line, current->line[t]);
-                                strcpy(current->line[t],cambio);
-                            }
-                            if(temp->prev != NULL) {
-                                temp = temp->prev;
-                            }else{
-                                temp = NULL;
-                            }
+                        docNode *temp = pickANode(current->i,&DocList);
+                        if(current->line == NULL) {  //vuol dire che si fa l'undo di un change che ha aggiunto la riga (prima del change c'era NULL, non un'altra riga)
+                            free(current->line);   //serve? è gia NULL
+                            int new_size = strlen(temp->line);
+                            current->line = (char*)calloc(new_size,sizeof(char));   //prima di eliminare il docNode aggiorno il valore (mi servirà in caso di redo)
+                            strcpy(current->line,temp->line);
+                            //free(current->line);
+                            //current->line = strdup(temp->line);
+                            clearDocList(&DocList,temp);
+                        }else{   //si fa l'undo di una modifica ad una riga già esistente
+                            char cambio[1025];
+                            strcpy(cambio,temp->line);    //backup riga prima di fare undo
+                            strcpy(temp->line, current->line);   //aggiorna riga
+                            //current->line = realloc(current->line,strlen(cambio));
+                            //strcpy(current->line,cambio);
+                            free(current->line);
+                            current->line = strdup(cambio);
                         }
-                        clearDocList(&DocList,eliminaDa);
-                        /*cont = current->n -1;
-                        docNode *temp = pickANode(current->i[cont],&DocList);       //DA CAMBIARE: parto dall'ultimo e vengo indietro
-                        for(int t=1;t<=current->n;t++){
-                            if(current->line[cont] == NULL){  //vuol dire che si fa l'undo di un change che ha aggiunto la riga (prima del change c'era NULL, non un'altra riga)
-                                if(DocList.count <= 1){   //si fa l'undo per rimuovere la prima change
-                                    DocList.header = DocList.tailer = NULL;
-                                }else {
-                                    temp->prev->next = NULL;
-                                    DocList.tailer = temp->prev;
-                                }
-                                current->line[cont] = temp->line;
-                                DocList.count--;
-                                free(temp);
-
-                            }else {
-                                char cambio[1025];
-                                strcpy(cambio,temp->line);
-                                strcpy(temp->line, current->line[cont]);
-                                strcpy(current->line[cont],cambio);
-                            }
-                            cont--;
-                            //temp = temp->next;
-                        }
-                         */
+                        prev = current->prev;
+                        moveTimeNode(current,&RedoList,&UndoList);
+                        current = prev;
                     }
-
-                    //devo poi spostare l'undo appena fatto nella RedoList
-                    UndoList.tailer = current->prev;
-                    moveTimeNode(current,&RedoList);
-                    UndoList.count--;
                 }
+                T = timeToReach+1;
 
                 break;
             case 'r':
+                token = strtok(command, "u");
+                strcpy(ind1,token);
+                i1 = atoi(ind1);    //numero di undo da eseguire
+                timeToReach = T + i1;
+                if(timeToReach < 1){
+                    timeToReach = 0;
+                }
+
+                if(RedoList.count > 0){
+                    current = RedoList.tailer;
+                    while (current != NULL && current->time < timeToReach){
+                        if(current->deleted == 1) {  //va ri-eseguita la delete
+                            //rieseguo delete
+                            current = reDelete(current,&DocList,&UndoList,&RedoList,timeToReach);
+                        }else{  //va eseguita una change per riportare la riga (ancora esistente) al valore prima della undo
+                            if(current->i > DocList.count){  //l'undo ha tolto una riga rimettendola a NULL
+                                insertDocNode(&DocList,current->line);
+                                current->line = NULL;
+                            }else{   //l'undo ha riportato la riga al vecchio valore (non NULL) devo rieseguire la change
+                                docNode *temp = pickANode(current->i,&DocList);
+                                char cambio[1025];
+                                strcpy(cambio,temp->line);
+                                strcpy(temp->line,current->line);
+                                strcpy(current->line,cambio);
+                            }
+                            timeNode *prev2 = current->prev;
+                            moveTimeNode(current,&UndoList,&RedoList);
+                            current = prev2;
+                        }
+                    }
+                }
+
+                T = timeToReach;
+                /*
                 token = strtok(command, "r");
                 strcpy(ind1,token);
                 i1 = atoi(ind1);    //numero di redo da eseguire
@@ -340,7 +335,7 @@ int main() {
                 }
 
 
-
+                */
                 break;
             case 'p':
                 token = strtok(command, ",");
@@ -351,8 +346,8 @@ int main() {
                 i1 = atoi(ind1);
                 i2 = atoi(ind2);
 
-                if(i1 == '0' && i2 == '0') {
-                    printf("\n.");       //sostituire con operazioni per file
+                if(i1 == 0 && i2 == 0) {
+                    printf(".\n");       //sostituire con operazioni per file
                 }else {
                     docNode *temp;
                     if(i1<=DocList.count) {
@@ -364,7 +359,7 @@ int main() {
                         } else {
                             printf("%s\n", temp->line);      //sostituire con operazioni per file
                         }
-                        if(temp->next != NULL) {
+                        if(temp != NULL && temp->next != NULL) {
                             temp = temp->next;
                         }
                     }
@@ -372,6 +367,10 @@ int main() {
 
                 break;
             case 'q':
+                clearDocList(&DocList,DocList.header);
+                clearList(&UndoList);
+                clearList(&RedoList);
+                free(line);
                 end = 0;
                 break;
             default:
@@ -379,7 +378,7 @@ int main() {
                 break;
 
         }
-        T++;
+
 
 
     }while(end==1);
@@ -414,7 +413,6 @@ void insertDocNode(docList *list,String l){
     docNode *new_node;
     docNode *temp;
     new_node = (docNode*) malloc(sizeof(docNode));
-    //temp = (docNode*) malloc(sizeof(docNode));
 
     new_node->next = NULL;
 
@@ -436,52 +434,114 @@ void insertDocNode(docList *list,String l){
     list->count++;
 }
 
-void rebuildList(timeNode *tNode, docList *list){
-    int nodoPrima = tNode->i[0]-1; //indice del nodo a cui ci si deve attaccare lato testa
-    //int nodoDopo = tNode->i[tNode->n-1]+1;  //indice del nodo a cui ci si deve attaccare lato coda
-    //docNode *temp = pickANode(nodoPrima,list);
-    //docNode *temp2 = pickANode(nodoDopo,list);
-    if(tNode->deleted == 1){  //va eseguita l'undo di una delete
-        int cont = 0;
-        docList *tempList;
-        tempList = (docList*)malloc(sizeof(docList));
-        init_docList(tempList);
-        for(int t=1;t<=tNode->n;t++){   //cicla sul numero di righe eliminate con la delete e crea una lista temporanea con gli n elementi eliminati
-            insertDocNode(tempList,tNode->line[cont]);
-        }
+timeNode* reDelete(timeNode *tNode, docList *DocList,timeList *UndoList,timeList *RedoList,int timeToReach){
+    int nodoPrima = tNode->i-1;
 
-        if(nodoPrima==0 && list->count>0){  //la tempList va reinserita prima del primo nodo in docList
-            docNode *temp2 = pickANode(nodoPrima+1,list);
-            tempList->tailer->next = temp2;   //attacca l'ultimo nodo in coda
-            temp2->prev = tempList->tailer;
-            list->header = tempList->header;
-        }
-
-        if(nodoPrima>0 && nodoPrima<list->count){  //la tempList va reinserita senza toccare gli estremi di docList
-            docNode *temp = pickANode(nodoPrima,list);
-            docNode *temp2 = pickANode(nodoPrima+1,list);
-            tempList->header->prev = temp;   //attacca il primo nodo in testa
-            temp->next = tempList->header;
-
-            tempList->tailer->next = temp2;   //attacca l'ultimo nodo in coda
-            temp2->prev = tempList->tailer;
-        }
-
-        if(nodoPrima>0 && nodoPrima>=list->count){  //la tempList sfora la coda di docList
-            docNode *temp = pickANode(nodoPrima,list);
-            tempList->header->prev = temp;   //attacca il primo nodo in testa
-            temp->next = tempList->header;
-            list->tailer = tempList->tailer;
-        }
-
-        if(nodoPrima==0 && nodoPrima>=list->count){
-            list->header = tempList->header;
-            list->tailer = tempList->tailer;
-        }
-
-        list->count = list->count + tempList->count;
-        free(tempList);
+    docNode *temp = pickANode(tNode->i,DocList);
+    docNode *temp2;
+    docNode *primo;
+    if(nodoPrima != 0){
+        primo = temp->prev;
     }
+    timeNode *next;
+    while(tNode != NULL && tNode->deleted == 1 && tNode->time < timeToReach && temp != NULL){
+        //aggiorno e sposto il nodo da redoList a undoList
+        next = tNode->prev;
+        changeTimeNode(RedoList->tailer,temp->line);
+        moveTimeNode(tNode,UndoList,RedoList);
+        tNode = next;
+
+        temp2 = temp->next;
+        temp->prev = NULL;
+        temp->next = NULL;
+        free(temp);
+        DocList->count--;
+        temp = temp2;
+    }
+
+    if(nodoPrima == 0){
+        DocList->header = temp;
+    }else{
+        temp->prev = primo;
+        primo->next = temp;
+    }
+
+    return tNode;
+}
+
+timeNode* rebuildList(timeNode *tNode, docList *list,timeList *UndoList,timeList *RedoList,int timeToReach){
+    int cont = 0;
+    docList *tempList;
+    timeNode *prev;
+    tempList = (docList*)malloc(sizeof(docList));
+    init_docList(tempList);  //magari problema con templist come puntatore
+    int nodoPrima; //indice del nodo a cui ci si deve attaccare lato testa
+
+
+    while(tNode != NULL && tNode->deleted == 1 && tNode->time > timeToReach){  //cicla sul numero di righe eliminate con la delete e crea una lista temporanea con gli n elementi eliminati
+        //------------
+        docNode *new_node;
+        docNode *temp;
+        new_node = (docNode*) calloc(1,sizeof(docNode));
+
+        new_node->prev = NULL;
+
+        if (tempList->count == 0)
+        {
+            new_node->next = NULL;
+            tempList->header = tempList->tailer = new_node;
+
+        }else{
+            new_node->next = tempList->header;
+            temp = tempList->header;
+            temp->prev = new_node;
+            tempList->header = new_node;
+        }
+
+        strcpy(new_node->line,tNode->line);      //copia nella line del nodo la striga letta in input
+        tempList->count++;
+        //-----------
+        prev = tNode->prev;
+        //devo aggiornare la linea di tnode prima di spostarlo in RedoList
+        moveTimeNode(tNode,RedoList,UndoList);
+        nodoPrima = tNode->i-1;
+        tNode = prev;
+    }
+
+    //int nodoDopo = tNode->i;  //indice del nodo a cui ci si deve attaccare lato coda
+
+    if(nodoPrima==0 && list->count>0){  //la tempList va reinserita prima del primo nodo in docList
+        docNode *temp2 = pickANode(nodoPrima+1,list);
+        tempList->tailer->next = temp2;   //attacca l'ultimo nodo in coda
+        temp2->prev = tempList->tailer;
+        list->header = tempList->header;
+    }
+
+    if(nodoPrima>0 && nodoPrima<list->count){  //la tempList va reinserita senza toccare gli estremi di docList
+        docNode *temp = pickANode(nodoPrima,list);
+        docNode *temp2 = pickANode(nodoPrima+1,list);
+        tempList->header->prev = temp;   //attacca il primo nodo in testa
+        temp->next = tempList->header;
+
+        tempList->tailer->next = temp2;   //attacca l'ultimo nodo in coda
+        temp2->prev = tempList->tailer;
+    }
+
+    if(nodoPrima>0 && nodoPrima>=list->count){  //la tempList sfora la coda di docList
+        docNode *temp = pickANode(nodoPrima,list);
+        tempList->header->prev = temp;   //attacca il primo nodo in testa
+        temp->next = tempList->header;
+        list->tailer = tempList->tailer;
+    }
+
+    if(nodoPrima==0 && nodoPrima>=list->count){
+        list->header = tempList->header;
+        list->tailer = tempList->tailer;
+    }
+
+    list->count = list->count + tempList->count;
+    free(tempList);
+    return tNode;
 }
 
 void changeDocNode(docNode *node, String l){
@@ -490,7 +550,7 @@ void changeDocNode(docNode *node, String l){
 }
 
 
-void insertTimeNode(int dim,timeList *list){
+void insertTimeNode(int time,int ind,timeList *list){
     // creo il nuovo nodo e gli alloco uno spazio di memoria
     timeNode *new_node;
     new_node = (timeNode*) malloc(sizeof(timeNode));
@@ -508,10 +568,17 @@ void insertTimeNode(int dim,timeList *list){
     }
 
     //strcpy(new_node->line,l);      //copia nella line del nodo la striga letta in input
-    new_node->n = dim +1;
-    new_node->i = (int*)malloc((new_node->n)*sizeof(int));     //alloca spazio per l'array degli indici riga cambiati
-    new_node->line = (char **)calloc((new_node->n),sizeof(char));     //alloca spazio per l'array delle stringhe
+    new_node->time = time;
+    new_node->i = ind;
+    new_node->deleted = 0;
+    //new_node->line = (char *)malloc(sizeof(char)*strlen(line));     //alloca spazio per le stringhe
+    //strcpy(new_node->line,line);
     list->count++;
+}
+void changeTimeNode(timeNode *node,char *line){
+    //node->line = (char *)malloc(sizeof(char)*strlen(line));     //alloca spazio per le stringhe
+    //strcpy(node->line,line);
+    node->line = strdup(line);
 }
 
 docNode* pickANode(int ind, docList *list){
@@ -549,10 +616,7 @@ void clearList(timeList *list){
     timeNode *next;
 
     while (current != NULL){
-        int num = current->n;
-        for(int i=0;i<num;i++){   //libera tutte le stringhe puntate dal vettore line[]
-            free(current->line[i]);
-        }
+        free(current->line);
         next = current->next;
         free(current);
         current = next;
@@ -566,11 +630,12 @@ void clearList(timeList *list){
 void clearDocList(docList *list,docNode *node){   //libera la docList a partire dal nodo passato (compreso)
     docNode *next;
 
-    if(list->count == 1){  //si sta cancellando a partire dal primo nodo
+    if(node->prev == NULL){  //si sta cancellando a partire dal primo nodo
         list->header = NULL;
         list->tailer = NULL;
     }else{
         list->tailer = node->prev;
+        list->tailer->next = NULL;
     }
 
     while (node != NULL){
@@ -581,18 +646,27 @@ void clearDocList(docList *list,docNode *node){   //libera la docList a partire 
     }
 }
 
-void moveTimeNode(timeNode *node, timeList *list){
-    if(list->count == 0){
-        list->header = node;
-        list->tailer = node;
+void moveTimeNode(timeNode *node, timeList *dest,timeList *source){
+    timeNode *temp = node->prev;
+    if(dest->count == 0){
+        dest->header = node;
+        dest->tailer = node;
         node->prev = NULL;
         node->next = NULL;
     }else{
-        node->prev = list->tailer;
-        list->tailer->next = node;
-        list->tailer = node;
+        node->prev = dest->tailer;
+        dest->tailer->next = node;
+        dest->tailer = node;
     }
-    list->count++;
+    dest->count++;
+
+    if(source->count == 1){
+        source->header = source->tailer = NULL;
+    }else{
+        source->tailer = temp;
+        temp->next = NULL;
+    }
+    source->count--;
 }
 
 
